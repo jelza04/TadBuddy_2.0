@@ -1,66 +1,77 @@
-# TADBuddy RAG — Learning Project
+# TADBuddy 2.0
 
-A Retrieval-Augmented Generation pipeline built from scratch to learn how embeddings, vector search, pgvector, and local LLMs actually work — not a hosted "agent API."
+A warm, empathetic AI health companion: daily mood check-ins, a chat that doubles as a journal,
+mood insights, and a backend that remembers what matters to you.
 
-## Stack
+| Folder | What it is | Stack |
+|---|---|---|
+| [`frontend/`](frontend) | Web app (chat, mood check, history, insights, tasks) | React 18 · Vite · TypeScript · Tailwind · Zustand |
+| [`backend/`](backend) | Chat API with retrieval + long-term memory | FastAPI · LangGraph · Ollama · Supabase (Postgres + pgvector) · Redis |
 
-- Python 3.11+, plain venv
-- Embeddings: `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim)
-- Vector store: Postgres + pgvector, hosted on Supabase
-- DB access: raw SQL via `psycopg2` + `pgvector` adapter — no ORM, so the actual queries stay visible
-- LLM: Ollama, called via raw HTTP — no SDK
-- No LangChain / LlamaIndex / agent frameworks. Every step is hand-written on purpose.
+## Architecture
 
-## Lessons
-
-- [x] Lesson 1 — pgvector setup + embeddings sanity check
-- [x] Lesson 2 — ingest the mental-health dataset into pgvector
-- [x] Lesson 3 — build the retrieval query (nearest-neighbor search)
-- [ ] Lesson 4 — generation with a local Ollama model
-- [ ] Lesson 5 — wrap the pipeline as a FastAPI service
-
-## Setup (Docker — keeps dependencies off your machine)
-
-Requires Docker Desktop running.
-
-```bash
-docker compose build
+```
+┌────────────────────────┐
+│  Frontend              │  React · Vite · Zustand
+│  Chat · Mood · Insights│  mood/tasks/reminders stay in localStorage
+└───────────┬────────────┘
+            │ HTTPS  ·  POST /v1/chat → Server-Sent Events
+            │ Authorization: Bearer <Supabase access token>   (AUTH_MODE=supabase)
+            │ X-User-Id: <uuid>                               (AUTH_MODE=dev)
+┌───────────▼────────────────────────────────────────────────────┐
+│  Backend  FastAPI                                               │
+│   auth ─ rate limit ─▶ LangGraph chat graph ─▶ SSE stream        │
+│                        └─ after stream: memory extraction        │
+└──────┬───────────────────────┬───────────────────────┬─────────┘
+       │ psycopg pool          │ HTTP                  │
+┌──────▼───────────┐   ┌───────▼────────┐      ┌───────▼──────┐
+│ Supabase         │   │ Ollama          │      │ Redis        │
+│ Postgres+pgvector│   │ llama3.2:3b     │      │ caches, rate │
+│ Auth (JWT/JWKS)  │   │ (ChatOllama)    │      │ limits       │
+└──────────────────┘   └────────────────┘      └──────────────┘
 ```
 
-This installs everything (incl. the CPU-only build of torch — the default wheel drags in CUDA libraries even with no GPU, which is most of the multi-GB size problem) inside the image, not your global Python.
+### Chat graph (LangGraph)
 
-Run `sql/lesson1_setup.sql` in the Supabase SQL Editor (Project → SQL Editor → New query) to enable pgvector and create the table — this part isn't containerized since Supabase is already hosted.
-
-## Run Lesson 1
-
-```bash
-docker compose run --rm rag-lessons
+```
+START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
+                                    └─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
+                                                             └→ retrieve_memory ─┤    │
+                                                                    build_prompt ◀┘    │
+                                                                         ↓             │
+                                                                     generate          │
+                                                                         ↓             │
+                                                                   output_guard        │
+                                                                         ↓             │
+                                                                      persist ◀────────┘ → END
 ```
 
-Later lessons: override the command, e.g. `docker compose run --rm rag-lessons python lesson2_ingest.py`.
+Crisis messages skip the LLM and get a fixed, reviewed reply. Knowledge-base examples and the
+user's memories are retrieved in parallel. Once the reply finishes streaming, new facts are
+extracted and saved as memories. Full details are in
+[backend/ARCHITECTURE_LANGGRAPH.md](backend/ARCHITECTURE_LANGGRAPH.md).
 
-## Run Lesson 4 (generation with Ollama)
-
-One-time setup -- starts a local LLM server in its own container and downloads a small model into it:
-
-```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull llama3.2:1b
-```
-
-`llama3.2:1b` is ~1.3GB and runs fine on CPU -- picked for size, not raw quality. Then:
+## Quick start
 
 ```bash
-docker compose run --rm rag-lessons python lesson4_generate.py
+# Backend: run backend/sql/001_schema.sql and 002_supabase_rls.sql in Supabase first
+cd backend
+cp .env.example .env              # fill in DATABASE_URL, SUPABASE_URL
+docker compose up -d ollama redis
+docker compose exec ollama ollama pull llama3.2:3b
+docker compose run --rm api python -m scripts.ingest_kb
+docker compose up api             # http://localhost:8000/docs
+
+# Frontend
+cd ../frontend
+cp .env.example .env              # VITE_TADBUDDY_API_URL=http://localhost:8000
+npm install
+npm run dev                       # http://localhost:5173
 ```
 
-To reclaim the disk space later: `docker compose down --rmi all -v`.
+`.env` files are git-ignored. Only `.env.example` templates are committed.
 
-## Setup without Docker (alternative)
+## Disclaimer
 
-```bash
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-python lesson1_embeddings.py
-```
+TADBuddy is a wellbeing companion, not a medical device. It doesn't diagnose, and it isn't a
+substitute for professional care. If you're in crisis, contact your local emergency number.

@@ -1,5 +1,0 @@
-sentence-transformers
-datasets
-psycopg2-binary
-pgvector
-requests

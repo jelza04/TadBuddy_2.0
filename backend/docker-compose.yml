@@ -1,0 +1,30 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on: [ollama, redis]
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+
+  ollama:
+    image: ollama/ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=2        # match LLM_MAX_CONCURRENCY in the API
+      - OLLAMA_KEEP_ALIVE=30m
+    volumes:
+      - ollama_models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+
+volumes:
+  hf_cache:
+  ollama_models:

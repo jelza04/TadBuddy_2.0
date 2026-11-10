@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+httpx
+psycopg[binary]
+psycopg-pool
+pgvector
+numpy
+sentence-transformers
+datasets
+redis
+PyJWT[crypto]
+langgraph
+langchain-core
+langchain-ollama

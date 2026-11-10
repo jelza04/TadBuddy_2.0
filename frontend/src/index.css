@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply font-body text-on-surface bg-surface antialiased;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.mso-fill {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.puffy-shadow {
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.1);
+}
+.puffy-shadow-soft {
+  box-shadow: 0 20px 50px rgba(18, 28, 40, 0.05);
+}
+.puffy-glow:hover {
+  box-shadow: 0 0 30px 5px rgba(255, 255, 255, 0.6);
+}
+.squishy-active:active {
+  transform: scale(0.92);
+}
+
+::-webkit-scrollbar { width: 6px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+mark.kw {
+  @apply bg-red-100 text-primary-deep rounded px-1 font-semibold;
+}
