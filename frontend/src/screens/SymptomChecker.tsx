@@ -6,6 +6,7 @@ import PuffyCard from '../components/PuffyCard'
 import TadFace from '../components/TadFace'
 import Icon from '../components/Icon'
 import Disclaimer from '../components/Disclaimer'
+import { useAppStore } from '../store/useAppStore'
 
 interface Question {
   id: string
@@ -41,8 +42,51 @@ function buildSummary(answers: Record<string, string>): { headline: string; tips
   }
 }
 
+const AREA_PHRASE: Record<string, string> = {
+  Head: 'your head',
+  Chest: 'your chest',
+  Stomach: 'your stomach',
+  'Muscles / joints': 'your muscles or joints',
+  'Mostly my mood': 'your mood',
+  'Somewhere else': 'how your body feels',
+}
+const DURATION_PHRASE: Record<string, string> = {
+  'Just today': 'since today',
+  'A few days': 'for a few days',
+  'About a week': 'for about a week',
+  'Longer than a week': 'for more than a week',
+}
+
+/** What TadBuddy says first in the chat, and what the backend is told, after a symptom check. */
+function buildChatContext(answers: Record<string, string>, summary: ReturnType<typeof buildSummary>) {
+  const area = AREA_PHRASE[answers.area] ?? 'how you feel'
+  const duration = DURATION_PHRASE[answers.duration] ?? ''
+  const hard = answers.severity === 'Hard to ignore' || answers.severity === "It's really disrupting things"
+  const poorSleep = answers.sleep === 'Poor' || answers.sleep === 'Barely sleeping'
+
+  let opener = `I saw your symptom check — something with ${area} ${duration}`.trim() + '.'
+  if (hard) opener += " It sounds like it's been hard to ignore."
+  if (poorSleep) opener += " And sleep hasn't been great either."
+  opener += ' I’m sorry it’s been rough.'
+  if (summary.urgent) opener += ' Because it’s been going on a while or really affecting you, checking in with a doctor would be a good idea — and I’m here to talk in the meantime.'
+  opener += ' Want to tell me what it’s been like?'
+
+  const summaryText = [
+    "The user just completed TadBuddy's symptom check (self-reflection only, not a diagnosis).",
+    ...QUESTIONS.map((q) => `- ${q.text} ${answers[q.id] ?? 'not answered'}`),
+    `Result shown to them: ${summary.headline}`,
+    summary.urgent ? 'The result suggested seeing a healthcare professional; gently reinforce that if relevant.' : '',
+    'TadBuddy already opened the chat by mentioning this check and asking how it has been.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  return { source: 'symptom_check' as const, summary: summaryText, opener }
+}
+
 export default function SymptomChecker() {
   const navigate = useNavigate()
+  const setChatContext = useAppStore((s) => s.setChatContext)
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const done = step >= QUESTIONS.length
@@ -60,7 +104,7 @@ export default function SymptomChecker() {
           <div className="flex justify-center mb-4">
             <TadFace size={100} mood={done ? 'good' : 'neutral'} />
           </div>
-          <h1 className="font-display text-4xl font-bold mb-2">Gentle Symptom Check</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-bold mb-2">Gentle Symptom Check</h1>
           <p className="text-tertiary max-w-lg mx-auto">
             A few soft questions to help you reflect. This is guidance for self-care only — never a diagnosis.
           </p>
@@ -132,7 +176,10 @@ export default function SymptomChecker() {
                 )}
                 <div className="flex flex-wrap gap-4">
                   <button
-                    onClick={() => navigate('/chat')}
+                    onClick={() => {
+                      setChatContext(buildChatContext(answers, summary!))
+                      navigate('/chat')
+                    }}
                     className="bg-primary-bright text-white font-bold px-8 py-4 rounded-full hover:scale-105 active:scale-95 transition-transform"
                   >
                     Talk it through with TadBuddy

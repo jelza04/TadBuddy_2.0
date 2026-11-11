@@ -46,15 +46,19 @@ export default function MoodCheck() {
 
       <main className="pt-32 pb-16 px-4 max-w-5xl mx-auto flex flex-col items-center gap-10 min-h-screen">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center space-y-3">
-          <h1 className="font-display text-3xl md:text-5xl font-bold text-white leading-tight max-w-3xl">
+          <h1 className="font-display text-2xl md:text-4xl font-bold text-white leading-tight max-w-3xl">
             {currentUser ? `Hi ${currentUser}! ` : ''}On a scale of 1 to 10, how do you feel today?
           </h1>
           <p className="text-white/70">Pick the bubble that matches your mood.</p>
         </motion.div>
 
-        {/* the 1–10 scale */}
-        <div className="w-full overflow-x-auto pb-6 scrollbar-hide">
-          <div className="flex items-end justify-between min-w-[820px] gap-3 px-4">
+        {/* the 1–10 scale.
+            No overflow-x-auto here: a horizontal scroll container also clips vertically,
+            which cut off the bubbles when they lift and grow on hover. A wrapping grid
+            (5 per row on small screens, 10 on large) never needs to scroll, and the top
+            padding leaves room for the hover lift. */}
+        <div className="w-full pt-6 pb-2">
+          <div className="grid grid-cols-5 lg:grid-cols-10 items-end justify-items-center gap-x-3 gap-y-8 px-2">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((score) => {
               const isSelected = selected === score
               return (

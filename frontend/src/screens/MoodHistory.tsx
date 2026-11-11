@@ -66,7 +66,7 @@ export default function MoodHistory() {
             <TadFace size={64} body={false} mood="good" className="mt-2" />
           </div>
           <div>
-            <h1 className="font-display text-4xl md:text-5xl font-bold">Mood History</h1>
+            <h1 className="font-display text-3xl md:text-4xl font-bold">Mood History</h1>
             <p className="text-on-surface-variant flex items-center gap-2 mt-1">
               <Icon name="trending_up" filled className="text-primary-bright" />
               Average this month:{' '}

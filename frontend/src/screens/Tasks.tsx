@@ -27,7 +27,7 @@ export default function Tasks() {
             <TadFace size={64} body={false} mood={progress >= 70 ? 'happy' : 'neutral'} className="mt-2" />
           </div>
           <div>
-            <h1 className="font-display text-4xl md:text-5xl font-bold">Wellness Tasks</h1>
+            <h1 className="font-display text-3xl md:text-4xl font-bold">Wellness Tasks</h1>
             <p className="text-on-surface-variant mt-1">Tiny steps count. I'll cheer for every one.</p>
           </div>
         </header>

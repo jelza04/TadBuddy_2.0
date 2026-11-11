@@ -2,8 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Every Tailwind size is in rem, so the root font size scales the whole UI.
+ * Laptops with Windows display scaling at 125-150% have a small CSS viewport
+ * (~1100x600), where 16px made text and cards too big and things got cut off.
+ */
+html {
+  font-size: 15px;
+}
+@media (min-width: 1536px) and (min-height: 860px) {
+  html {
+    font-size: 16px;
+  }
+}
+@media (max-height: 700px), (max-width: 380px) {
+  html {
+    font-size: 14px;
+  }
+}
+
 body {
   @apply font-body text-on-surface bg-surface antialiased;
+  overflow-wrap: break-word;
 }
 
 .material-symbols-outlined {

@@ -63,7 +63,7 @@ export default function Settings() {
             <TadFace size={64} body={false} className="mt-2" />
           </div>
           <div>
-            <h1 className="font-display text-4xl md:text-5xl font-bold">Settings</h1>
+            <h1 className="font-display text-3xl md:text-4xl font-bold">Settings</h1>
             <p className="text-on-surface-variant mt-1">Signed in as <span className="font-bold text-primary">{currentUser}</span></p>
           </div>
         </header>

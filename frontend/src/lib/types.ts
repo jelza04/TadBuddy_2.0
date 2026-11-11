@@ -38,6 +38,18 @@ export interface Reminder {
   enabled: boolean
 }
 
+/** Extra context carried into the chat, e.g. the result of a symptom check. */
+export interface ChatContext {
+  user: string
+  source: 'symptom_check'
+  /** sent to the backend so the LLM knows what happened */
+  summary: string
+  /** TadBuddy's first message when the chat opens */
+  opener: string
+  openerShown?: boolean
+  createdAt: string
+}
+
 export interface Settings {
   soundEnabled: boolean
   ttsEnabled: boolean

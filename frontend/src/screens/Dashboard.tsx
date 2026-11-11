@@ -87,7 +87,7 @@ export default function Dashboard() {
       <header className="flex flex-col md:flex-row items-center justify-between gap-8 mb-10 bg-white p-8 md:p-12 rounded-[3rem] puffy-shadow-soft relative overflow-hidden">
         <div className="absolute top-0 right-0 w-72 h-72 bg-primary-fixed opacity-20 rounded-full -mr-24 -mt-24 blur-3xl" />
         <div className="z-10 text-center md:text-left">
-          <h1 className="font-display text-4xl md:text-5xl font-bold mb-3">
+          <h1 className="font-display text-3xl md:text-4xl font-bold mb-3">
             {greeting}, {currentUser}!
           </h1>
           <p className="text-tertiary max-w-lg mb-6">

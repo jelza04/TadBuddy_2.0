@@ -120,7 +120,7 @@ bump `times_seen`/`importance`, others are inserted. Skipped for crisis messages
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/v1/chat` | `{conversation_id?, message, user_name?, mood_score? (1-10)}` → SSE. Omit `conversation_id` to start one. |
+| POST | `/v1/chat` | `{conversation_id?, message, user_name?, mood_score? (1-10), context? (≤1,500 chars, e.g. symptom-check summary)}` → SSE. Omit `conversation_id` to start one. `context` is placed in a `<context>` block of the system prompt. |
 | POST | `/v1/conversations` | New empty conversation |
 | GET | `/v1/conversations/{id}/messages` | Transcript (owner only) |
 | GET / DELETE | `/v1/memories` | View / forget all memories |

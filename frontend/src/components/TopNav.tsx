@@ -26,7 +26,7 @@ export default function TopNav() {
           <span className="text-xl md:text-2xl font-black font-display text-primary-bright tracking-tight">TadBuddy</span>
         </button>
 
-        <div className="hidden md:flex items-center gap-8">
+        <div className="hidden lg:flex items-center gap-6 xl:gap-8">
           {LINKS.map((l) => (
             <NavLink
               key={l.to}

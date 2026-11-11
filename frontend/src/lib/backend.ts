@@ -53,6 +53,8 @@ export interface StreamOptions {
   moodScore?: number | null
   /** called once with the emotion detected in the user's message (before the reply streams) */
   onEmotion?: (emotion: string) => void
+  /** extra context for this session, e.g. a symptom-check summary */
+  context?: string | null
 }
 
 /**
@@ -75,6 +77,7 @@ export async function streamFromBackend(
       message: text,
       user_name: userName,
       mood_score: options.moodScore ?? null,
+      context: options.context ?? null,
     }),
   })
 

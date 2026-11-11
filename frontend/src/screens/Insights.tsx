@@ -105,7 +105,7 @@ export default function Insights() {
       <header className="flex flex-col md:flex-row items-center justify-between gap-6 mb-10 bg-white p-8 md:p-10 rounded-[3rem] puffy-shadow-soft relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-primary-fixed opacity-20 rounded-full -mr-20 -mt-20 blur-3xl" />
         <div className="z-10 text-center md:text-left">
-          <h1 className="font-display text-4xl md:text-5xl font-bold mb-2">Your Insights</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-bold mb-2">Your Insights</h1>
           <p className="text-tertiary max-w-lg">
             {currentUser ? `Great work, ${currentUser}! ` : ''}
             {moods.length > 0

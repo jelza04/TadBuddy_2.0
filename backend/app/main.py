@@ -69,6 +69,8 @@ class ChatRequest(BaseModel):
     # Optional personalisation from the frontend
     user_name: str | None = Field(default=None, max_length=60)
     mood_score: int | None = Field(default=None, ge=1, le=10)
+    # e.g. a symptom-check summary the user just completed
+    context: str | None = Field(default=None, max_length=1500)
 
 
 def _sse(data: dict, event: str | None = None) -> str:
@@ -125,7 +127,8 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
         raise HTTPException(404, "conversation not found")
 
     inputs = {"user_id": user_id, "conversation_id": conversation_id, "message": req.message,
-              "started": time.perf_counter(), "user_name": req.user_name, "mood_score": req.mood_score}
+              "started": time.perf_counter(), "user_name": req.user_name, "mood_score": req.mood_score,
+              "context": req.context}
     result: dict = {}
 
     async def stream():

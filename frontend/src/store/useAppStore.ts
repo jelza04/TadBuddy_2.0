@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { load, save, uid } from '../lib/storage'
 import { sha256 } from '../lib/hash'
-import type { ChatMessage, MoodEntry, Reminder, Settings, TaskItem, User } from '../lib/types'
+import type { ChatContext, ChatMessage, MoodEntry, Reminder, Settings, TaskItem, User } from '../lib/types'
 
 interface AppState {
   currentUser: string | null
@@ -13,6 +13,14 @@ interface AppState {
   reminders: Reminder[]
   settings: Settings
   todayMood: number | null
+  /** context to carry into the next chat (symptom check result) */
+  chatContext: ChatContext | null
+  /** chat has been "minimized" into the floating bubble */
+  buddyDocked: boolean
+
+  setChatContext: (ctx: Omit<ChatContext, 'user' | 'createdAt'> | null) => void
+  markContextOpened: () => void
+  setBuddyDocked: (docked: boolean) => void
 
   register: (name: string, password: string) => Promise<string | null>
   login: (name: string, password: string) => Promise<string | null>
@@ -45,6 +53,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   reminders: load<Reminder[]>('reminders', []),
   settings: load<Settings>('settings', { soundEnabled: true, ttsEnabled: false }),
   todayMood: null,
+  chatContext: load<ChatContext | null>('chatContext', null),
+  buddyDocked: load<boolean>('buddyDocked', false),
+
+  setChatContext: (ctx) => {
+    const user = get().currentUser
+    const next = ctx && user ? { ...ctx, user, createdAt: new Date().toISOString() } : null
+    save('chatContext', next)
+    set({ chatContext: next })
+  },
+
+  markContextOpened: () => {
+    const ctx = get().chatContext
+    if (!ctx) return
+    const next = { ...ctx, openerShown: true }
+    save('chatContext', next)
+    set({ chatContext: next })
+  },
+
+  setBuddyDocked: (docked) => {
+    save('buddyDocked', docked)
+    set({ buddyDocked: docked })
+  },
 
   register: async (name, password) => {
     const clean = name.trim()

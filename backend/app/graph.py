@@ -62,6 +62,7 @@ class ChatState(TypedDict, total=False):
     started: float
     user_name: str | None
     mood_score: int | None
+    context: str | None
     # filled in by nodes
     history: list[dict]
     user_message_id: int
@@ -120,6 +121,7 @@ def build_graph(chat_model: BaseChatModel):
             user_name=state.get("user_name"),
             mood_score=state.get("mood_score"),
             emotion=state.get("emotion"),
+            context=state.get("context"),
         )
         return {"prompt": prompt, "low_confidence": low_conf}
 
