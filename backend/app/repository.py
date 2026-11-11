@@ -60,6 +60,11 @@ async def add_message(conversation_id: str, role: str, content: str, *, safety_f
     return row[0]
 
 
+async def set_message_emotion(message_id: int, emotion: str) -> None:
+    async with pool.connection() as conn:
+        await conn.execute("update messages set emotion = %s where id = %s", (emotion, message_id))
+
+
 async def log_retrieval(message_id: int, kb_hits, memories, low_confidence: bool) -> None:
     async with pool.connection() as conn:
         await conn.execute(

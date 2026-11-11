@@ -1,7 +1,23 @@
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 
-export type TadMood = 'sad' | 'low' | 'neutral' | 'good' | 'happy' | 'talking'
+/**
+ * Mood-scale faces (sad → happy) plus chat expressions TadBuddy uses to react
+ * to what the user says (concerned, calm, excited, sleepy, surprised, listening).
+ */
+export type TadMood =
+  | 'sad'
+  | 'low'
+  | 'neutral'
+  | 'good'
+  | 'happy'
+  | 'talking'
+  | 'concerned'
+  | 'calm'
+  | 'excited'
+  | 'sleepy'
+  | 'surprised'
+  | 'listening'
 
 export function moodFromScore(score: number): TadMood {
   if (score <= 2) return 'sad'
@@ -55,6 +71,12 @@ export default function TadFace({ mood = 'neutral', size = 120, body = true, cla
         transition={{ repeat: Infinity, duration: 0.9 }}
       />
     ),
+    concerned: <path d="M 43 72 Q 50 69 57 72" stroke="#121c28" strokeWidth="2.5" fill="none" strokeLinecap="round" />,
+    calm: <path d="M 44 69 Q 50 73 56 69" stroke="#121c28" strokeWidth="2.5" fill="none" strokeLinecap="round" />,
+    excited: <path d="M 39 65 Q 50 82 61 65 Z" fill="#121c28" />,
+    sleepy: <ellipse cx="50" cy="71" rx="2.5" ry="2" fill="#121c28" />,
+    surprised: <ellipse cx="50" cy="71" rx="4" ry="5" fill="#121c28" />,
+    listening: null,
   }
 
   return (

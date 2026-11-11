@@ -6,9 +6,13 @@ import Icon from '../components/Icon'
 import PageShell from '../components/PageShell'
 import { streamReply } from '../lib/ai'
 import { detectCrisis, CRISIS_MESSAGE } from '../lib/crisis'
+import { guessEmotion, isUserEmotion, REACTION, STATUS } from '../lib/emotion'
 import { splitKeywords } from '../lib/keywords'
 import { createRecognizer, speak, stopSpeaking } from '../lib/speech'
-import { useAppStore, useMyMessages } from '../store/useAppStore'
+import { useAppStore, useMyMessages, useMyMoods } from '../store/useAppStore'
+
+/** How long TadBuddy holds its reaction after replying before relaxing to neutral. */
+const HOLD_MS = 4000
 
 function HighlightedText({ text }: { text: string }) {
   return (
@@ -38,30 +42,67 @@ export default function Chat() {
   const [busy, setBusy] = useState(false)
   const [recording, setRecording] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
-  const [avatarMood, setAvatarMood] = useState<TadMood>('neutral')
+  // Avatar: `expression` is the face/body pose, `talking` animates the mouth on top of it.
+  const [expression, setExpression] = useState<TadMood>('neutral')
+  const [talking, setTalking] = useState(false)
+  const holdTimer = useRef<ReturnType<typeof setTimeout>>()
   const feedRef = useRef<HTMLDivElement>(null)
   const recognizerRef = useRef<ReturnType<typeof createRecognizer>>(null)
+
+  const moods = useMyMoods()
+  const todayScore = (() => {
+    const today = new Date().toISOString().slice(0, 10)
+    const entries = moods.filter((m) => m.date === today)
+    return entries.length ? entries[entries.length - 1].score : null
+  })()
 
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
 
-  useEffect(() => () => stopSpeaking(), [])
+  useEffect(
+    () => () => {
+      stopSpeaking()
+      clearTimeout(holdTimer.current)
+    },
+    []
+  )
+
+  // While the user is typing, TadBuddy tilts its head and listens.
+  useEffect(() => {
+    if (busy) return
+    if (input.trim()) {
+      clearTimeout(holdTimer.current)
+      setExpression('listening')
+    } else if (expression === 'listening') {
+      setExpression('neutral')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, busy])
+
+  const relaxLater = () => {
+    clearTimeout(holdTimer.current)
+    holdTimer.current = setTimeout(() => setExpression('neutral'), HOLD_MS)
+  }
 
   const send = async (text: string) => {
     const clean = text.trim()
     if (!clean || busy) return
+    clearTimeout(holdTimer.current)
     setInput('')
     setBusy(true)
-    setAvatarMood('talking')
+    setTalking(false)
+    // React instantly with a local guess; the backend's classifier refines it a moment later.
+    setExpression(REACTION[guessEmotion(clean)])
     addMessage('user', clean)
 
     if (detectCrisis(clean)) {
+      setExpression('concerned')
       const msg = addMessage('assistant', CRISIS_MESSAGE)
       speak(CRISIS_MESSAGE, settings.ttsEnabled)
       updateMessage(msg.id, CRISIS_MESSAGE)
       setBusy(false)
-      setAvatarMood('neutral')
+      relaxLater()
       return
     }
 
@@ -70,16 +111,26 @@ export default function Chat() {
       const full = await streamReply(
         messages,
         clean,
-        (partial) => updateMessage(placeholder.id, partial),
-        currentUser ?? undefined
+        (partial) => {
+          setTalking(true)
+          updateMessage(placeholder.id, partial)
+        },
+        {
+          userName: currentUser ?? undefined,
+          moodScore: todayScore,
+          onEmotion: (e) => {
+            if (isUserEmotion(e)) setExpression(REACTION[e])
+          },
+        }
       )
       speak(full, settings.ttsEnabled)
     } catch {
+      setExpression('concerned')
       updateMessage(placeholder.id, "Oh no, my circuits hiccuped. Could you try that again?")
     } finally {
       setBusy(false)
-      setAvatarMood('good')
-      setTimeout(() => setAvatarMood('neutral'), 2500)
+      setTalking(false)
+      relaxLater()
     }
   }
 
@@ -119,12 +170,14 @@ export default function Chat() {
               className="cursor-pointer"
               title="TadBuddy"
             >
-              <TadBot3D width={300} mood={avatarMood} />
+              <TadBot3D width={300} mood={expression} talking={talking} />
             </motion.div>
             <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 bg-white px-6 py-2 rounded-full shadow-lg border border-slate-100 flex items-center gap-2 whitespace-nowrap">
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <span className="text-xs font-semibold tracking-widest text-slate-500 uppercase">
-                {busy ? 'Thinking…' : recording ? 'Listening…' : 'Here for you'}
+                {recording
+                  ? 'Listening…'
+                  : STATUS[expression] ?? (busy ? 'Thinking…' : 'Here for you')}
               </span>
             </div>
           </div>

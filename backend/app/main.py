@@ -22,6 +22,7 @@ from .cache import cache
 from .config import settings
 from .db import pool
 from .embeddings import load_model
+from .emotion import load_model as load_emotion_model
 from .graph import build_graph, default_chat_model, run_streaming
 from .llm import LLMBusy
 from .memory import remember
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
     global graph
     await pool.open()
     await asyncio.to_thread(load_model)
+    await asyncio.to_thread(load_emotion_model)
     graph = build_graph(default_chat_model())
     yield
     await pool.close()
@@ -64,6 +66,9 @@ async def rate_limited(user_id: str = Depends(current_user)) -> str:
 class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str = Field(min_length=1, max_length=4000)
+    # Optional personalisation from the frontend
+    user_name: str | None = Field(default=None, max_length=60)
+    mood_score: int | None = Field(default=None, ge=1, le=10)
 
 
 def _sse(data: dict, event: str | None = None) -> str:
@@ -120,7 +125,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
         raise HTTPException(404, "conversation not found")
 
     inputs = {"user_id": user_id, "conversation_id": conversation_id, "message": req.message,
-              "started": time.perf_counter()}
+              "started": time.perf_counter(), "user_name": req.user_name, "mood_score": req.mood_score}
     result: dict = {}
 
     async def stream():
@@ -129,6 +134,8 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
             async for kind, value in run_streaming(graph, inputs):
                 if kind == "token":
                     yield _sse({"token": value})
+                elif kind == "emotion":
+                    yield _sse({"emotion": value}, event="emotion")
                 else:
                     result.update(value)
         except LLMBusy:
@@ -141,6 +148,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
         log.info("chat user=%s flag=%s low_conf=%s", user_id, result.get("safety_flag"),
                  result.get("low_confidence"))
         yield _sse({"message_id": result.get("assistant_message_id"),
+                    "emotion": result.get("emotion"),
                     "safety_flag": result.get("safety_flag"),
                     "low_confidence": result.get("low_confidence", False)}, event="done")
 

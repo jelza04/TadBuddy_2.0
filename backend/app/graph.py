@@ -6,16 +6,16 @@
                        ┌──────▼───────┐
                        │ input_guard  │  crisis keyword check
                        └──┬────────┬──┘
-                 crisis   │        │  ok
-                ┌─────────▼──┐  ┌──▼──────────┐
-                │crisis_reply│  │ embed_query │
-                └─────┬──────┘  └──┬───────┬──┘
-                      │     ┌──────▼──┐ ┌──▼──────────────┐   (parallel)
-                      │     │retrieve_│ │retrieve_memory  │
-                      │     │   kb    │ └──┬──────────────┘
-                      │     └──────┬──┘    │
-                      │       ┌────▼───────▼┐
-                      │       │ build_prompt│
+                 crisis   │        │  ok ─────────────────────┐
+                ┌─────────▼──┐  ┌──▼──────────┐   ┌──────────▼─────┐
+                │crisis_reply│  │ embed_query │   │ detect_emotion │ (parallel)
+                └─────┬──────┘  └──┬───────┬──┘   └──────────┬─────┘
+                      │     ┌──────▼──┐ ┌──▼──────────────┐  │
+                      │     │retrieve_│ │retrieve_memory  │  │
+                      │     │   kb    │ └──┬──────────────┘  │
+                      │     └──────┬──┘    │                 │
+                      │       ┌────▼───────▼┐                │
+                      │       │ build_prompt│◀───────────────┘ waits for all three
                       │       └──────┬──────┘
                       │       ┌──────▼──────┐
                       │       │  generate   │  ChatOllama — tokens streamed via stream_mode="messages"
@@ -47,6 +47,7 @@ from langgraph.graph import END, START, StateGraph
 from . import repository as repo
 from .config import settings
 from .embeddings import embed
+from .emotion import detect as detect_emotion_of
 from .llm import acquire_slot, release_slot
 from .prompt import build_messages
 from .retrieval import KBHit, MemoryHit, search_kb, search_memories
@@ -59,10 +60,13 @@ class ChatState(TypedDict, total=False):
     conversation_id: str
     message: str
     started: float
+    user_name: str | None
+    mood_score: int | None
     # filled in by nodes
     history: list[dict]
     user_message_id: int
     safety_flag: str | None
+    emotion: str
     query_vec: list[float]
     kb_hits: list[dict]
     memories: list[dict]
@@ -89,7 +93,11 @@ def build_graph(chat_model: BaseChatModel):
         return {"safety_flag": result.category if result.flagged else None}
 
     async def crisis_reply(state: ChatState) -> dict:
-        return {"reply": crisis_response(), "low_confidence": False, "kb_hits": [], "memories": []}
+        return {"reply": crisis_response(), "low_confidence": False, "kb_hits": [], "memories": [],
+                "emotion": "sad"}
+
+    async def detect_emotion(state: ChatState) -> dict:
+        return {"emotion": await detect_emotion_of(state["message"])}
 
     async def embed_query(state: ChatState) -> dict:
         vec = await embed(state["message"])
@@ -109,6 +117,9 @@ def build_graph(chat_model: BaseChatModel):
             state.get("history", []),
             [KBHit(**h) for h in state.get("kb_hits", [])],
             [MemoryHit(**m) for m in state.get("memories", [])],
+            user_name=state.get("user_name"),
+            mood_score=state.get("mood_score"),
+            emotion=state.get("emotion"),
         )
         return {"prompt": prompt, "low_confidence": low_conf}
 
@@ -133,6 +144,8 @@ def build_graph(chat_model: BaseChatModel):
             model="safety-template" if crisis else settings.chat_model,
             latency_ms=latency,
         )
+        if state.get("emotion"):
+            await repo.set_message_emotion(state["user_message_id"], state["emotion"])
         if not crisis:
             await repo.log_retrieval(
                 msg_id,
@@ -146,6 +159,7 @@ def build_graph(chat_model: BaseChatModel):
     g = StateGraph(ChatState)
     for name, fn in [
         ("load_context", load_context), ("input_guard", input_guard), ("crisis_reply", crisis_reply),
+        ("detect_emotion", detect_emotion),
         ("embed_query", embed_query), ("retrieve_kb", retrieve_kb), ("retrieve_memory", retrieve_memory),
         ("build_prompt", build_prompt), ("generate", generate), ("output_guard", output_guard),
         ("persist", persist),
@@ -154,15 +168,17 @@ def build_graph(chat_model: BaseChatModel):
 
     g.add_edge(START, "load_context")
     g.add_edge("load_context", "input_guard")
+    # Returning a list from the router fans out: embedding and emotion run in parallel.
     g.add_conditional_edges(
         "input_guard",
-        lambda s: "crisis" if s.get("safety_flag") else "ok",
-        {"crisis": "crisis_reply", "ok": "embed_query"},
+        lambda s: ["crisis_reply"] if s.get("safety_flag") else ["embed_query", "detect_emotion"],
+        ["crisis_reply", "embed_query", "detect_emotion"],
     )
     g.add_edge("crisis_reply", "persist")
     g.add_edge("embed_query", "retrieve_kb")       # fan-out: both retrievals run in parallel
     g.add_edge("embed_query", "retrieve_memory")
-    g.add_edge(["retrieve_kb", "retrieve_memory"], "build_prompt")  # fan-in: waits for both
+    # fan-in: build_prompt waits until all three have finished
+    g.add_edge(["retrieve_kb", "retrieve_memory", "detect_emotion"], "build_prompt")
     g.add_edge("build_prompt", "generate")
     g.add_edge("generate", "output_guard")
     g.add_edge("output_guard", "persist")
@@ -183,8 +199,10 @@ def default_chat_model() -> BaseChatModel:
 
 
 async def run_streaming(graph, inputs: dict[str, Any]):
-    """Yields ("token", str) while generating, then ("final", state)."""
+    """Yields ("emotion", str) as soon as it's known, ("token", str) while
+    generating, then ("final", state)."""
     final: dict = {}
+    emotion_sent = False
     async for mode, chunk in graph.astream(inputs, stream_mode=["messages", "values"]):
         if mode == "messages":
             msg, meta = chunk
@@ -192,4 +210,9 @@ async def run_streaming(graph, inputs: dict[str, Any]):
                 yield "token", msg.content
         elif mode == "values":
             final = chunk
+            # Emotion is ready right after detect_emotion/crisis_reply -- before
+            # generation starts -- so the avatar can react to the user first.
+            if not emotion_sent and chunk.get("emotion"):
+                emotion_sent = True
+                yield "emotion", chunk["emotion"]
     yield "final", final

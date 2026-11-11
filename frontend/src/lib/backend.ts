@@ -48,6 +48,13 @@ function headers(userName: string): HeadersInit {
   return { 'Content-Type': 'application/json', 'X-User-Id': backendUserId(userName) }
 }
 
+export interface StreamOptions {
+  /** today's 1–10 mood check-in, used to personalise the reply */
+  moodScore?: number | null
+  /** called once with the emotion detected in the user's message (before the reply streams) */
+  onEmotion?: (emotion: string) => void
+}
+
 /**
  * Sends a message and streams the reply. onToken receives the full text so far.
  * Resolves with the final reply text.
@@ -56,19 +63,25 @@ export async function streamFromBackend(
   userName: string,
   text: string,
   onToken: (partial: string) => void,
+  options: StreamOptions = {},
   retried = false
 ): Promise<string> {
   const conversation_id = load<string | null>(conversationKey(userName), null)
   const res = await fetch(`${API_URL}/v1/chat`, {
     method: 'POST',
     headers: headers(userName),
-    body: JSON.stringify({ conversation_id, message: text, stream: true }),
+    body: JSON.stringify({
+      conversation_id,
+      message: text,
+      user_name: userName,
+      mood_score: options.moodScore ?? null,
+    }),
   })
 
   // Conversation was deleted server-side (e.g. DB reset) -> start a fresh one once.
   if (res.status === 404 && conversation_id && !retried) {
     save(conversationKey(userName), null)
-    return streamFromBackend(userName, text, onToken, true)
+    return streamFromBackend(userName, text, onToken, options, true)
   }
   if (res.status === 429) throw new BackendError('Give me a second to catch my breath — try again in a moment.')
   if (res.status === 503) throw new BackendError("I'm chatting with a lot of people right now. Try again in a few seconds?")
@@ -111,6 +124,8 @@ export async function streamFromBackend(
         const payload = JSON.parse(data)
         if (event === 'error') {
           throw new BackendError(payload.message ?? "I'm a bit overloaded right now. Try again in a moment?")
+        } else if (event === 'emotion' && payload.emotion) {
+          options.onEmotion?.(payload.emotion)
         } else if (event === 'meta' && payload.conversation_id) {
           save(conversationKey(userName), payload.conversation_id)
         } else if (event === 'message' && payload.token) {

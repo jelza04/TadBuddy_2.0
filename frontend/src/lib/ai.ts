@@ -1,21 +1,26 @@
 import { XAI_API_KEY, XAI_MODEL, XAI_URL, SYSTEM_PROMPT } from '../config/ai'
-import { BackendError, backendEnabled, streamFromBackend } from './backend'
+import { BackendError, backendEnabled, streamFromBackend, type StreamOptions } from './backend'
 import type { ChatMessage } from './types'
+
+export interface ReplyOptions extends StreamOptions {
+  userName?: string
+}
 
 /**
  * Streams TadBuddy's reply token by token via onToken; resolves with full text.
  *
- * Priority: TADBuddy v2 API (RAG + memory) → xAI direct → built-in mock.
+ * Priority: TADBuddy v2 API (RAG + memory + emotion) → xAI direct → built-in mock.
  */
 export async function streamReply(
   history: ChatMessage[],
   userText: string,
   onToken: (partial: string) => void,
-  userName?: string
+  options: ReplyOptions = {}
 ): Promise<string> {
+  const { userName, ...streamOptions } = options
   if (backendEnabled() && userName) {
     try {
-      return await streamFromBackend(userName, userText, onToken)
+      return await streamFromBackend(userName, userText, onToken, streamOptions)
     } catch (err) {
       // Friendly, specific messages (rate limit / busy) are shown as-is.
       if (err instanceof BackendError && !err.message.startsWith('TADBuddy API error')) {

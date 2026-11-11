@@ -39,6 +39,10 @@ class Settings:
     llm_max_concurrency: int = _int("LLM_MAX_CONCURRENCY", 2)
     llm_queue_timeout_s: float = _float("LLM_QUEUE_TIMEOUT_S", 20.0)
 
+    # Emotion detection: "model" (classifier, falls back to keywords) | "keywords"
+    emotion_backend: str = os.environ.get("EMOTION_BACKEND", "model")
+    emotion_model: str = os.environ.get("EMOTION_MODEL", "j-hartmann/emotion-english-distilroberta-base")
+
     # Retrieval
     kb_top_k: int = _int("KB_TOP_K", 3)
     memory_top_k: int = _int("MEMORY_TOP_K", 3)

@@ -66,8 +66,9 @@ class ChatState(TypedDict, total=False):
 
 ```
 START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
-                                    └─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
-                                                             └→ retrieve_memory ─┤    │
+                                    ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
+                                    │                        └→ retrieve_memory ─┤    │
+                                    └─ ok ────→ detect_emotion ──────────────────┤    │
                                                                     build_prompt ◀┘    │
                                                                          ↓             │
                                                                      generate          │
@@ -77,14 +78,17 @@ START → load_context → input_guard ─┬─ crisis → crisis_reply ──�
                                                                       persist ◀────────┘ → END
 ```
 
+`detect_emotion` runs alongside embedding + retrieval; `build_prompt` waits for all three.
+
 | Node | Does | Module |
 |---|---|---|
 | `load_context` | Last 6 turns from `messages`; saves the user message | `repository.py` |
 | `input_guard` | Crisis pattern check. **Conditional edge** routes crisis away from the LLM | `safety.py` |
 | `crisis_reply` | Fixed, reviewed response + resources | `safety.py` |
+| `detect_emotion` | Classifies the message as happy / sad / anxious / angry / tired / surprised / neutral (DistilRoBERTa emotion model, keyword fallback). Sent to the frontend immediately for the avatar's expression, and used for tone guidance in the prompt | `emotion.py` |
 | `embed_query` | Embed the message (cached by text hash) | `embeddings.py` |
 | `retrieve_kb` ∥ `retrieve_memory` | **Run in parallel** (fan-out/fan-in). KB top-3 by cosine; memories top-20 re-ranked by recency + importance → top-3 | `retrieval.py` |
-| `build_prompt` | Persona + `<memory>` + `<examples>` + history + message, within a 2,500-token budget; low-confidence mode if top distance > 0.75 | `prompt.py` |
+| `build_prompt` | Persona + `<style>` voice examples + "about this user" (name, today's mood score, detected emotion) + `<memory>` + `<examples>` + history + message, within a 2,500-token budget; low-confidence mode if top distance > 0.75 | `prompt.py` |
 | `generate` | `ChatOllama.ainvoke` under a concurrency semaphore | `graph.py`, `llm.py` |
 | `output_guard` | Blocks diagnosis language | `safety.py` |
 | `persist` | Saves the reply + `retrieval_logs` row | `repository.py` |
@@ -116,7 +120,7 @@ bump `times_seen`/`importance`, others are inserted. Skipped for crisis messages
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/v1/chat` | `{conversation_id?, message}` → SSE. Omit `conversation_id` to start one. |
+| POST | `/v1/chat` | `{conversation_id?, message, user_name?, mood_score? (1-10)}` → SSE. Omit `conversation_id` to start one. |
 | POST | `/v1/conversations` | New empty conversation |
 | GET | `/v1/conversations/{id}/messages` | Transcript (owner only) |
 | GET / DELETE | `/v1/memories` | View / forget all memories |
@@ -126,11 +130,18 @@ bump `times_seen`/`importance`, others are inserted. Skipped for crisis messages
 SSE events:
 
 ```
-event: meta   data: {"conversation_id": "…"}
-              data: {"token": "That"}          (repeated)
-event: error  data: {"message": "TADBuddy is busy…"}   (LLM saturated)
-event: done   data: {"message_id": 812, "safety_flag": null, "low_confidence": false}
+event: meta     data: {"conversation_id": "…"}
+event: emotion  data: {"emotion": "anxious"}     (before any tokens — avatar reacts first)
+                data: {"token": "That"}          (repeated)
+event: error    data: {"message": "TADBuddy is busy…"}   (LLM saturated)
+event: done     data: {"message_id": 812, "emotion": "anxious", "safety_flag": null, "low_confidence": false}
 ```
+
+**Avatar reaction (frontend `Chat.tsx`):** typing → *listening* (head tilt) · send → instant local
+guess, replaced by the backend `emotion` event · reply streams → mouth talks on top of the
+expression · done → hold 4 s → neutral. Mapping (`src/lib/emotion.ts`): happy→excited,
+sad→concerned (arms open), anxious/angry→calm (slow heart pulse), tired→sleepy,
+surprised→surprised, neutral→smile.
 
 HTTP errors: `401` auth · `404` not your conversation · `422` invalid body · `429` rate limit.
 
@@ -211,7 +222,7 @@ backend/
 ## 8. Running it
 
 ```bash
-# Supabase SQL editor: run sql/001_schema.sql, then sql/002_supabase_rls.sql
+# Supabase SQL editor: run sql/001_schema.sql, sql/002_supabase_rls.sql, sql/003_message_emotion.sql
 cp .env.example .env                      # fill DATABASE_URL (+ SUPABASE_URL)
 docker compose build
 docker compose up -d ollama redis

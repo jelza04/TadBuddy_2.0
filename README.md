@@ -35,8 +35,9 @@ mood insights, and a backend that remembers what matters to you.
 
 ```
 START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
-                                    └─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
-                                                             └→ retrieve_memory ─┤    │
+                                    ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
+                                    │                        └→ retrieve_memory ─┤    │
+                                    └─ ok ────→ detect_emotion ──────────────────┤    │
                                                                     build_prompt ◀┘    │
                                                                          ↓             │
                                                                      generate          │

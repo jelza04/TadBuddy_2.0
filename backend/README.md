@@ -35,8 +35,9 @@ Full design notes: [ARCHITECTURE_LANGGRAPH.md](ARCHITECTURE_LANGGRAPH.md) (curre
 
 ```
 START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
-                                    └─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
-                                                             └→ retrieve_memory ─┤    │
+                                    ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
+                                    │                        └→ retrieve_memory ─┤    │
+                                    └─ ok ────→ detect_emotion ──────────────────┤    │
                                                                     build_prompt ◀┘    │
                                                                          ↓             │
                                                                      generate          │
@@ -47,6 +48,7 @@ START → load_context → input_guard ─┬─ crisis → crisis_reply ──�
 ```
 
 - **input_guard** sends crisis messages to a fixed, reviewed reply, so they never reach the LLM.
+- **detect_emotion** labels the message (happy, sad, anxious, angry, tired, surprised or neutral). The label goes to the frontend straight away so the avatar can react, and it also sets the tone of the reply.
 - **retrieve_kb** and **retrieve_memory** run in parallel: the top 3 knowledge-base examples, plus memories re-ranked by recency and importance.
 - **build_prompt** fits persona, memories, examples and history into a 2,500-token budget.
 - **output_guard** blocks diagnosis language before the reply is saved.
