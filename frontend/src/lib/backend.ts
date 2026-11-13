@@ -86,7 +86,16 @@ export async function streamFromBackend(
     save(conversationKey(userName), null)
     return streamFromBackend(userName, text, onToken, options, true)
   }
-  if (res.status === 429) throw new BackendError('Give me a second to catch my breath — try again in a moment.')
+  if (res.status === 429) {
+    // Rate limited. The server says why (per-minute vs daily) and when to retry.
+    const detail = await res
+      .json()
+      .then((j) => (typeof j?.detail === 'string' ? j.detail : null))
+      .catch(() => null)
+    const wait = Number(res.headers.get('retry-after'))
+    const when = wait > 0 && wait < 3600 ? ` (try again in about ${Math.max(1, Math.round(wait / 60))} min)` : ''
+    throw new BackendError((detail ?? 'Give me a second to catch my breath — try again in a moment.') + when)
+  }
   if (res.status === 503) throw new BackendError("I'm chatting with a lot of people right now. Try again in a few seconds?")
   if (!res.ok) throw new BackendError(`TADBuddy API error ${res.status}`)
 
@@ -131,6 +140,10 @@ export async function streamFromBackend(
           options.onEmotion?.(payload.emotion)
         } else if (event === 'meta' && payload.conversation_id) {
           save(conversationKey(userName), payload.conversation_id)
+        } else if (event === 'replace' && typeof payload.text === 'string') {
+          // Output guardrail fired: swap the reply for the safe version.
+          full = payload.text
+          onToken(full)
         } else if (event === 'message' && payload.token) {
           full += payload.token
           onToken(full)

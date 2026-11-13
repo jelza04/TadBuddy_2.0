@@ -235,6 +235,7 @@ export default function Chat() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Tell TadBuddy how you feel…"
+                maxLength={4000}
                 disabled={leaving}
                 className="flex-1 min-w-0 bg-surface-container-low border-none rounded-full px-5 md:px-7 py-3.5 focus:ring-4 focus:ring-primary-bright/10 puffy-shadow outline-none placeholder:text-slate-400"
               />

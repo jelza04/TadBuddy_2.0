@@ -106,6 +106,7 @@ function MiniChat({ onClose, onExpand }: { onClose: () => void; onExpand: () => 
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Say hi to TadBuddy…"
+          maxLength={4000}
           className="flex-1 min-w-0 bg-surface-container-low rounded-full px-4 py-2.5 text-sm outline-none focus:ring-4 focus:ring-primary-bright/10 placeholder:text-slate-400"
         />
         <button

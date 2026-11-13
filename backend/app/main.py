@@ -8,9 +8,10 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -18,7 +19,6 @@ from starlette.background import BackgroundTask
 
 from . import repository as repo
 from .auth import user_id_from_request
-from .cache import cache
 from .config import settings
 from .db import pool
 from .embeddings import load_model
@@ -26,6 +26,8 @@ from .emotion import load_model as load_emotion_model
 from .graph import build_graph, default_chat_model, run_streaming
 from .llm import LLMBusy
 from .memory import remember
+from .ratelimit import limit_chat, limit_ip
+from .safety import SENTENCE_END, check_sentence
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("tadbuddy.api")
@@ -50,15 +52,19 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_me
 
 
 # --------------------------------------------------------------------------- dependencies
-async def current_user(user_id: str = Depends(user_id_from_request)) -> str:
+async def current_user(request: Request, user_id: str = Depends(user_id_from_request)) -> str:
+    # Every /v1 route goes through here, so the per-IP limit covers all of them.
+    await limit_ip(request)
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(401, "invalid user id")
     await repo.ensure_user(user_id)
     return user_id
 
 
 async def rate_limited(user_id: str = Depends(current_user)) -> str:
-    bucket = f"rl:{user_id}:{int(time.time() // 60)}"
-    if await cache.incr(bucket, ttl=70) > settings.rate_limit_per_min:
-        raise HTTPException(429, "slow down a little")
+    await limit_chat(user_id)
     return user_id
 
 
@@ -133,10 +139,23 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
 
     async def stream():
         yield _sse({"conversation_id": conversation_id}, event="meta")
+        # Output guardrail: tokens are held until a sentence is complete, the
+        # sentence is checked, and only then sent. A flagged sentence never
+        # reaches the user; the rest of the reply is withheld and replaced.
+        pending = ""
+        blocked = False
         try:
             async for kind, value in run_streaming(graph, inputs):
                 if kind == "token":
-                    yield _sse({"token": value})
+                    if blocked:
+                        continue
+                    pending += value
+                    while (m := SENTENCE_END.search(pending)):
+                        sentence, pending = pending[:m.end()], pending[m.end():]
+                        if check_sentence(sentence):
+                            blocked = True
+                            break
+                        yield _sse({"token": sentence})
                 elif kind == "emotion":
                     yield _sse({"emotion": value}, event="emotion")
                 else:
@@ -145,9 +164,19 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
             yield _sse({"message": "TADBuddy is busy, try again in a moment"}, event="error")
             return
 
-        # Crisis replies don't come from the LLM, so nothing was streamed — send it whole.
+        if not blocked and pending:
+            if check_sentence(pending):
+                blocked = True
+            else:
+                yield _sse({"token": pending})
+
         if result.get("safety_flag"):
+            # Input-guard replies don't come from the LLM, so nothing was streamed — send it whole.
             yield _sse({"token": result["reply"]})
+        elif blocked or result.get("output_flag"):
+            # Replace whatever was shown with the safe message the graph stored.
+            yield _sse({"text": result.get("reply", "")}, event="replace")
+            log.warning("output guard flag=%s user=%s", result.get("output_flag"), user_id)
         log.info("chat user=%s flag=%s low_conf=%s", user_id, result.get("safety_flag"),
                  result.get("low_confidence"))
         yield _sse({"message_id": result.get("assistant_message_id"),
@@ -156,8 +185,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(rate_limited)):
                     "low_confidence": result.get("low_confidence", False)}, event="done")
 
     async def after():
-        # Never store memories from crisis messages; skip if the graph didn't finish.
-        if result.get("assistant_message_id") and not result.get("safety_flag"):
+        # No long-term memory from safety-flagged or injection-like messages,
+        # or if the graph didn't finish.
+        if (result.get("assistant_message_id") and not result.get("safety_flag")
+                and not result.get("injection_suspected")):
             await remember(user_id, req.message, result["user_message_id"])
 
     return StreamingResponse(stream(), media_type="text/event-stream", background=BackgroundTask(after))

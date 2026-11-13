@@ -58,14 +58,14 @@ class ChatState(TypedDict, total=False):
     query_vec                                         # embed_query
     kb_hits, memories                                 # retrieve_kb / retrieve_memory
     prompt, low_confidence                            # build_prompt
-    reply                                             # generate / crisis_reply / output_guard
+    reply                                             # generate / safety_reply / output_guard
     assistant_message_id                              # persist
 ```
 
 ### 3.2 Graph
 
 ```
-START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
+START → load_context → input_guard ─┬─ flagged → safety_reply ───────────────────────┐
                                     ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
                                     │                        └→ retrieve_memory ─┤    │
                                     └─ ok ────→ detect_emotion ──────────────────┤    │
@@ -83,14 +83,14 @@ START → load_context → input_guard ─┬─ crisis → crisis_reply ──�
 | Node | Does | Module |
 |---|---|---|
 | `load_context` | Last 6 turns from `messages`; saves the user message | `repository.py` |
-| `input_guard` | Crisis pattern check. **Conditional edge** routes crisis away from the LLM | `safety.py` |
-| `crisis_reply` | Fixed, reviewed response + resources | `safety.py` |
+| `input_guard` | Crisis / medical-emergency / harm-to-others checks (+ injection flag). **Conditional edge** routes flagged messages away from the LLM | `safety.py` |
+| `safety_reply` | Fixed response for the flagged category + resources | `safety.py` |
 | `detect_emotion` | Classifies the message as happy / sad / anxious / angry / tired / surprised / neutral (DistilRoBERTa emotion model, keyword fallback). Sent to the frontend immediately for the avatar's expression, and used for tone guidance in the prompt | `emotion.py` |
 | `embed_query` | Embed the message (cached by text hash) | `embeddings.py` |
 | `retrieve_kb` ∥ `retrieve_memory` | **Run in parallel** (fan-out/fan-in). KB top-3 by cosine; memories top-20 re-ranked by recency + importance → top-3 | `retrieval.py` |
 | `build_prompt` | Persona + `<style>` voice examples + "about this user" (name, today's mood score, detected emotion) + `<memory>` + `<examples>` + history + message, within a 2,500-token budget; low-confidence mode if top distance > 0.75 | `prompt.py` |
 | `generate` | `ChatOllama.ainvoke` under a concurrency semaphore | `graph.py`, `llm.py` |
-| `output_guard` | Blocks diagnosis language | `safety.py` |
+| `output_guard` | Re-checks the full reply (diagnosis, medication, harm methods); stores the safe version | `safety.py` |
 | `persist` | Saves the reply + `retrieval_logs` row | `repository.py` |
 
 ### 3.3 Streaming
@@ -181,7 +181,32 @@ pausing a flagged conversation with `interrupt()` until a reviewer approves the 
 
 ---
 
-## 6. Caching
+## 6. Guardrails & rate limiting
+
+All rules live in `app/safety.py` and `app/ratelimit.py`.
+
+| Layer | What it catches | What happens |
+|---|---|---|
+| **Rate limit — IP** | > 60 requests/min from one IP, any `/v1` route (also stops rotating fake `X-User-Id`s) | `429` + `Retry-After` |
+| **Rate limit — user** | > 12 chat messages/min, > 300/day | `429` + `Retry-After`; frontend shows the reason |
+| **Request validation** | message 1–4,000 chars, name ≤ 60, mood 1–10, context ≤ 1,500, user id must be a UUID | `422` / `401` |
+| **Input guard** | `crisis` (self-harm, suicide), `medical_emergency` (can't breathe, chest pain, took too many pills), `harm_to_others` | Fixed response, **LLM and memory skipped**, flag stored on the message |
+| **Injection check** | "ignore your instructions", "reveal your prompt", "act as a doctor"… | Still answered, but the prompt gets a reminder to keep its rules; **no memory written** |
+| **Prompt fencing** | Instructions hidden in retrieved data, memories, or symptom-check context | All wrapped in `<style>/<context>/<memory>/<examples>` tags the system prompt marks as data |
+| **Output guard (streaming)** | `diagnosis` ("you might have depression"), `medication` (doses, named drugs), `harm_method` | Tokens are released **one sentence at a time, after the sentence is checked**. A flagged sentence never reaches the user; the reply is replaced (`event: replace`) and the safe text is stored |
+| **Memory guard** | PII (emails, phone numbers, ID/card numbers), diagnosis/medication "facts", injection messages | Redacted or dropped before storage; max 300 memories/user (least important evicted) |
+| **LLM capacity** | Too many simultaneous generations | Semaphore; `event: error` after 20 s queue wait |
+| **Database** | Direct reads through Supabase's public API | RLS on, no policies |
+
+Trade-off: sentence-level release makes streaming slightly chunkier (a sentence at a time rather
+than word by word) — the price of never showing an unchecked sentence.
+
+Keyword rules over-trigger by design. Next step: a dedicated safety classifier, keywords as fallback,
+and a clinically reviewed response policy.
+
+---
+
+## 7. Caching
 
 | What | Key | TTL |
 |---|---|---|
@@ -194,7 +219,7 @@ Never cached: memory search and LLM replies (personal data).
 
 ---
 
-## 7. Project layout
+## 8. Project layout
 
 ```
 backend/
@@ -219,7 +244,7 @@ backend/
 
 ---
 
-## 8. Running it
+## 9. Running it
 
 ```bash
 # Supabase SQL editor: run sql/001_schema.sql, sql/002_supabase_rls.sql, sql/003_message_emotion.sql
@@ -236,7 +261,7 @@ cd ../frontend && echo VITE_TADBUDDY_API_URL=http://localhost:8000 > .env && npm
 
 ---
 
-## 9. Next steps
+## 10. Next steps
 
 1. Run end to end against Supabase + Ollama (not yet done).
 2. Switch the frontend to Supabase Auth and set `AUTH_MODE=supabase`.

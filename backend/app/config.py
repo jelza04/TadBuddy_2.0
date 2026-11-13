@@ -56,7 +56,16 @@ class Settings:
     # Caching / limits
     embed_cache_ttl_s: int = _int("EMBED_CACHE_TTL_S", 86400)
     kb_cache_ttl_s: int = _int("KB_CACHE_TTL_S", 3600)
-    rate_limit_per_min: int = _int("RATE_LIMIT_PER_MIN", 20)
+    rate_limit_per_min: int = _int("RATE_LIMIT_PER_MIN", 12)       # chat messages / user / minute
+    rate_limit_per_day: int = _int("RATE_LIMIT_PER_DAY", 300)      # chat messages / user / day
+    ip_rate_limit_per_min: int = _int("IP_RATE_LIMIT_PER_MIN", 60)  # all /v1 calls / IP / minute
+    trust_proxy: bool = os.environ.get("TRUST_PROXY", "false").lower() == "true"
+    max_memories_per_user: int = _int("MAX_MEMORIES_PER_USER", 300)
+
+    emergency_resources: str = os.environ.get(
+        "EMERGENCY_RESOURCES",
+        "Please call your local emergency number right now (112 in India, 911 in the US).",
+    )
 
     # Must be set to verified, local resources before any real user sees this.
     crisis_resources: str = os.environ.get(

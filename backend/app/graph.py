@@ -4,11 +4,11 @@
             START ───▶ │ load_context │  history + persist user message
                        └──────┬───────┘
                        ┌──────▼───────┐
-                       │ input_guard  │  crisis keyword check
+                       │ input_guard  │  crisis / emergency / harm-to-others / injection
                        └──┬────────┬──┘
-                 crisis   │        │  ok ─────────────────────┐
+                 flagged  │        │  ok ─────────────────────┐
                 ┌─────────▼──┐  ┌──▼──────────┐   ┌──────────▼─────┐
-                │crisis_reply│  │ embed_query │   │ detect_emotion │ (parallel)
+                │safety_reply│  │ embed_query │   │ detect_emotion │ (parallel)
                 └─────┬──────┘  └──┬───────┬──┘   └──────────┬─────┘
                       │     ┌──────▼──┐ ┌──▼──────────────┐  │
                       │     │retrieve_│ │retrieve_memory  │  │
@@ -51,7 +51,7 @@ from .emotion import detect as detect_emotion_of
 from .llm import acquire_slot, release_slot
 from .prompt import build_messages
 from .retrieval import KBHit, MemoryHit, search_kb, search_memories
-from .safety import check_input, check_output, crisis_response
+from .safety import check_input, check_output, response_for
 
 
 class ChatState(TypedDict, total=False):
@@ -66,7 +66,9 @@ class ChatState(TypedDict, total=False):
     # filled in by nodes
     history: list[dict]
     user_message_id: int
-    safety_flag: str | None
+    safety_flag: str | None          # input guard: crisis / medical_emergency / harm_to_others
+    injection_suspected: bool
+    output_flag: str | None          # output guard: diagnosis / medication / harm_method
     emotion: str
     query_vec: list[float]
     kb_hits: list[dict]
@@ -91,11 +93,12 @@ def build_graph(chat_model: BaseChatModel):
 
     async def input_guard(state: ChatState) -> dict:
         result = check_input(state["message"])
-        return {"safety_flag": result.category if result.flagged else None}
+        return {"safety_flag": result.category if result.flagged else None,
+                "injection_suspected": result.injection_suspected}
 
-    async def crisis_reply(state: ChatState) -> dict:
-        return {"reply": crisis_response(), "low_confidence": False, "kb_hits": [], "memories": [],
-                "emotion": "sad"}
+    async def safety_reply(state: ChatState) -> dict:
+        return {"reply": response_for(state["safety_flag"]), "low_confidence": False, "kb_hits": [],
+                "memories": [], "emotion": "sad"}
 
     async def detect_emotion(state: ChatState) -> dict:
         return {"emotion": await detect_emotion_of(state["message"])}
@@ -122,6 +125,7 @@ def build_graph(chat_model: BaseChatModel):
             mood_score=state.get("mood_score"),
             emotion=state.get("emotion"),
             context=state.get("context"),
+            injection_suspected=state.get("injection_suspected", False),
         )
         return {"prompt": prompt, "low_confidence": low_conf}
 
@@ -135,14 +139,15 @@ def build_graph(chat_model: BaseChatModel):
         return {"reply": str(result.content)}
 
     async def output_guard(state: ChatState) -> dict:
-        return {"reply": check_output(state["reply"])}
+        reply, flag = check_output(state["reply"])
+        return {"reply": reply, "output_flag": flag}
 
     async def persist(state: ChatState) -> dict:
         crisis = state.get("safety_flag") is not None
         latency = int((time.perf_counter() - state["started"]) * 1000)
         msg_id = await repo.add_message(
             state["conversation_id"], "assistant", state["reply"],
-            safety_flag=state.get("safety_flag"),
+            safety_flag=state.get("safety_flag") or (f"output:{state['output_flag']}" if state.get("output_flag") else None),
             model="safety-template" if crisis else settings.chat_model,
             latency_ms=latency,
         )
@@ -160,7 +165,7 @@ def build_graph(chat_model: BaseChatModel):
     # ---------------------------------------------------------------- wiring
     g = StateGraph(ChatState)
     for name, fn in [
-        ("load_context", load_context), ("input_guard", input_guard), ("crisis_reply", crisis_reply),
+        ("load_context", load_context), ("input_guard", input_guard), ("safety_reply", safety_reply),
         ("detect_emotion", detect_emotion),
         ("embed_query", embed_query), ("retrieve_kb", retrieve_kb), ("retrieve_memory", retrieve_memory),
         ("build_prompt", build_prompt), ("generate", generate), ("output_guard", output_guard),
@@ -173,10 +178,10 @@ def build_graph(chat_model: BaseChatModel):
     # Returning a list from the router fans out: embedding and emotion run in parallel.
     g.add_conditional_edges(
         "input_guard",
-        lambda s: ["crisis_reply"] if s.get("safety_flag") else ["embed_query", "detect_emotion"],
-        ["crisis_reply", "embed_query", "detect_emotion"],
+        lambda s: ["safety_reply"] if s.get("safety_flag") else ["embed_query", "detect_emotion"],
+        ["safety_reply", "embed_query", "detect_emotion"],
     )
-    g.add_edge("crisis_reply", "persist")
+    g.add_edge("safety_reply", "persist")
     g.add_edge("embed_query", "retrieve_kb")       # fan-out: both retrievals run in parallel
     g.add_edge("embed_query", "retrieve_memory")
     # fan-in: build_prompt waits until all three have finished
@@ -212,7 +217,7 @@ async def run_streaming(graph, inputs: dict[str, Any]):
                 yield "token", msg.content
         elif mode == "values":
             final = chunk
-            # Emotion is ready right after detect_emotion/crisis_reply -- before
+            # Emotion is ready right after detect_emotion/safety_reply -- before
             # generation starts -- so the avatar can react to the user first.
             if not emotion_sent and chunk.get("emotion"):
                 emotion_sent = True
