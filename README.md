@@ -34,7 +34,7 @@ mood insights, and a backend that remembers what matters to you.
 ### Chat graph (LangGraph)
 
 ```
-START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
+START → load_context → input_guard ─┬─ flagged → safety_reply ──────────────────────┐
                                     ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
                                     │                        └→ retrieve_memory ─┤    │
                                     └─ ok ────→ detect_emotion ──────────────────┤    │
@@ -47,7 +47,7 @@ START → load_context → input_guard ─┬─ crisis → crisis_reply ──�
                                                                       persist ◀────────┘ → END
 ```
 
-Crisis messages skip the LLM and get a fixed, reviewed reply. Knowledge-base examples and the
+Crisis, medical-emergency and harm-to-others messages skip the LLM and get a fixed safety reply. Every reply is checked sentence by sentence before the user sees it, and the API is rate-limited per IP and per user. Knowledge-base examples and the
 user's memories are retrieved in parallel. Once the reply finishes streaming, new facts are
 extracted and saved as memories. Full details are in
 [backend/ARCHITECTURE_LANGGRAPH.md](backend/ARCHITECTURE_LANGGRAPH.md).

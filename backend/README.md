@@ -34,7 +34,7 @@ Full design notes: [ARCHITECTURE_LANGGRAPH.md](ARCHITECTURE_LANGGRAPH.md) (curre
 ### Chat graph (LangGraph)
 
 ```
-START → load_context → input_guard ─┬─ crisis → crisis_reply ───────────────────────┐
+START → load_context → input_guard ─┬─ flagged → safety_reply ──────────────────────┐
                                     ├─ ok ────→ embed_query ─┬→ retrieve_kb ─────┐    │
                                     │                        └→ retrieve_memory ─┤    │
                                     └─ ok ────→ detect_emotion ──────────────────┤    │
@@ -47,11 +47,12 @@ START → load_context → input_guard ─┬─ crisis → crisis_reply ──�
                                                                       persist ◀────────┘ → END
 ```
 
-- **input_guard** sends crisis messages to a fixed, reviewed reply, so they never reach the LLM.
+- **input_guard** flags crisis, medical-emergency and harm-to-others messages and sends them to **safety_reply**, a fixed response with resources. Flagged messages never reach the LLM, and nothing from them is saved as a memory.
 - **detect_emotion** labels the message (happy, sad, anxious, angry, tired, surprised or neutral). The label goes to the frontend straight away so the avatar can react, and it also sets the tone of the reply.
 - **retrieve_kb** and **retrieve_memory** run in parallel: the top 3 knowledge-base examples, plus memories re-ranked by recency and importance.
 - **build_prompt** fits persona, memories, examples and history into a 2,500-token budget.
-- **output_guard** blocks diagnosis language before the reply is saved.
+- **output_guard** checks each sentence before it's streamed to the user (diagnosis, medication, harm methods). If a sentence is flagged, the reply is replaced with a safe one.
+- **Rate limits:** 60 requests/min per IP, and 12 chats/min and 300/day per user (`app/ratelimit.py`). Over the limit, the API returns `429` with `Retry-After`.
 - Once the stream closes, a background task pulls out lasting facts and stores them as deduplicated memories.
 
 ## Tech stack
